@@ -1,0 +1,240 @@
+services:
+  studio:
+    container_name: supabase-studio
+    image: supabase/studio:2025.01.24-sha-0c48e78
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require("http").get("http://localhost:3000/api/profile", (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+      LOGFLARE_URL: http://analytics:4000
+      NEXT_PUBLIC_ENABLE_LOGS: true
+      NEXT_PUBLIC_V2_AUTH_UI: true
+    ports:
+      - "3001:3000" # <--- PUERTO 3001 PARA QUE PUEDAS ENTRAR
+  kong:
+    container_name: supabase-kong
+    image: kong:2.8.1
+    restart: unless-stopped
+    ports:
+      - 8000:8000/tcp
+      - 8443:8443/tcp
+    environment:
+      KONG_DATABASE: off
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_WEBRTC_URL: ${SUPABASE_WEBRTC_URL}
+    volumes:
+      # RUTA ABSOLUTA SEGURA
+      - /home/supabase_latest/volumes/api/kong.yml:/var/lib/kong/kong.yml:ro
+  auth:
+    container_name: supabase-auth
+    image: supabase/gotrue:v2.166.1
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_EMAIL_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+    depends_on:
+      db:
+        condition: service_healthy
+  rest:
+    container_name: supabase-rest
+    image: postgrest/postgrest:v12.2.0
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    depends_on:
+      db:
+        condition: service_healthy
+  realtime:
+    container_name: supabase-realtime
+    image: supabase/realtime:v2.33.58
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: ${SECRET_KEY_BASE}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      ENABLE_TAILSCALE: "false"
+      DNS_NODES: "''"
+    depends_on:
+      db:
+        condition: service_healthy
+  storage:
+    container_name: supabase-storage
+    image: supabase/storage-api:v1.14.4
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGRES_DATA_DATABASE: postgres
+      POSTGRES_DATA_HOST: db
+      POSTGRES_DATA_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATA_PORT: 5432
+      POSTGRES_DATA_USER: supabase_storage_admin
+      USERS_DATABASE: postgres
+      USERS_HOST: db
+      USERS_PASSWORD: ${POSTGRES_PASSWORD}
+      USERS_PORT: 5432
+      USERS_USER: supabase_storage_admin
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+    volumes:
+      # RUTA ABSOLUTA SEGURA
+      - /home/supabase_latest/volumes/storage:/var/lib/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      imgproxy:
+        condition: service_started
+  imgproxy:
+    container_name: supabase-imgproxy
+    image: darthsim/imgproxy:v3.26.0
+    restart: unless-stopped
+    environment:
+      IMGPROXY_BIND: :5001
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
+  meta:
+    container_name: supabase-meta
+    image: supabase/postgres-meta:v0.84.2
+    restart: unless-stopped
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      PG_META_DB_SSL: "false"
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+  functions:
+    container_name: supabase-functions
+    image: supabase/edge-runtime:v1.65.2
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      VERIFY_JWT: ${FUNCTIONS_VERIFY_JWT}
+    volumes:
+      # RUTA ABSOLUTA SEGURA
+      - /home/supabase_latest/volumes/functions:/root/functions
+  analytics:
+    container_name: supabase-analytics
+    image: supabase/logflare:1.4.0
+    restart: unless-stopped
+    environment:
+      LOGFLARE_NODE_HOST: 0.0.0.0
+      DB_USERNAME: supabase_admin
+      DB_DATABASE: postgres
+      DB_HOSTNAME: db
+      DB_PORT: 5432
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_SCHEMA: _analytics
+      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+      LOGFLARE_SINGLE_TENANT: true
+    depends_on:
+      db:
+        condition: service_healthy
+  vector:
+    container_name: supabase-vector
+    image: timberio/vector:0.28.1-alpine
+    restart: unless-stopped
+    environment:
+      VECTOR_API_PORT: 9001
+    volumes:
+      # RUTA ABSOLUTA SEGURA
+      - /home/supabase_latest/volumes/logs/vector.yml:/etc/vector/vector.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+  db:
+    container_name: supabase-db
+    image: supabase/postgres:15.6.1.144
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY}
+    volumes:
+      # RUTAS ABSOLUTAS SEGURAS
+      - /home/supabase_latest/volumes/db/data:/var/lib/postgresql/data
+      - /home/supabase_latest/volumes/db/init:/docker-entrypoint-initdb.d
+      - /home/supabase_latest/volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql
+      - /home/supabase_latest/volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql
+      - /home/supabase_latest/volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql
+      - /home/supabase_latest/volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql
+      - /home/supabase_latest/volumes/db/logs.sql:/docker-entrypoint-initdb.d/init-scripts/99-logs.sql
+      - /home/supabase_latest/volumes/db/pooler.sql:/docker-entrypoint-initdb.d/init-scripts/99-pooler.sql
