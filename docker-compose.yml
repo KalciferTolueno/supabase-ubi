@@ -46,7 +46,7 @@ services:
       - /home/supabase_latest/volumes/api/kong.yml:/var/lib/kong/kong.yml:ro
   auth:
     container_name: supabase-auth
-    image: supabase/gotrue:v2.166.1
+    image: supabase/gotrue:v2.158.1
     restart: unless-stopped
     environment:
       GOTRUE_API_HOST: 0.0.0.0
